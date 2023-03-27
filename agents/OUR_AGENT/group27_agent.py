@@ -52,6 +52,11 @@ class TemplateAgent(DefaultParty):
         self.opponent_model: OpponentModel = None
         self.logger.log(logging.INFO, "party is initialized")
 
+        self.received_opponent_bids = [] # or just empty list i guess
+        self.max = 1.0
+        self.min = 0.6
+        self.e = 0.05
+
     def notifyChange(self, data: Inform):
         """MUST BE IMPLEMENTED
         This is the entry point of all interaction with your agent after is has been initialised.
@@ -131,13 +136,13 @@ class TemplateAgent(DefaultParty):
 
     # give a description of your agent
     def getDescription(self) -> str:
-        """MUST BE IMPLEMENTED
+        """
         Returns a description of your agent. 1 or 2 sentences.
 
         Returns:
             str: Agent description
         """
-        return "Template agent for the ANL 2022 competition"
+        return "Agent of group 27 for the Collaborative AI Course 2023"
 
     def opponent_action(self, action):
         """Process an action that was received from the opponent.
@@ -158,12 +163,14 @@ class TemplateAgent(DefaultParty):
             # set bid as last received
             self.last_received_bid = bid
 
+            self.received_opponent_bids.append(bid, self.profile.getUtility(bid)) # store the ones we received
+
     def my_turn(self):
         """This method is called when it is our turn. It should decide upon an action
         to perform and send this action to the opponent.
         """
         # check if the last received offer is good enough
-        if self.accept_condition(self.last_received_bid):
+        if self.accept_condition(self.last_received_bid, self.find_bid()):
             # if so, accept the offer
             action = Accept(self.me, self.last_received_bid)
         else:
@@ -187,25 +194,37 @@ class TemplateAgent(DefaultParty):
     ################################## Example methods below ##################################
     ###########################################################################################
 
-    def accept_condition(self, bid: Bid) -> bool:
+    def accept_condition(self, bid: Bid, next_bid: Bid) -> bool:
         if bid is None:
             return False
 
         # progress of the negotiation session between 0 and 1 (1 is deadline)
         progress = self.progress.get(time() * 1000)
 
-        # very basic approach that accepts if the offer is valued above 0.7 and
-        # 95% of the time towards the deadline has passed
-        conditions = [
-            self.profile.getUtility(bid) > 0.8,
-            progress > 0.95,
-        ]
-        return all(conditions)
+        if self.profile.getReservationBid() is None:
+            reservation = 0.0
+        else:
+            reservation = self.profile.getUtility(self.profile.getReservationBid())
+
+        received_bid_utility = self.profile.getUtility(bid) 
+        condition1 = received_bid_utility >= self.threshold_acceptance and received_bid_utility >= reservation # better than we hoped for
+        condition2 = progress > 0.97 and received_bid_utility > self.min and received_bid_utility >= reservation # we are running out of time
+        condition3 = self.alpha*float(received_bid_utility) + self.betta >= float(
+            self.profile.getUtility(next_bid)) and received_bid_utility >= reservation # we are winning
+
+        return condition1 or condition2 or condition3
+
+    def thresholds(self):
+        progress = self.progress.get(time() * 1000)
+        
+        self.threshold_acceptance = self.p(self.min + 0.1, self.max, self.e, progress) - (0.1 * ((progress + 0.0000001)))
 
     def find_bid(self) -> Bid:
         # compose a list of all possible bids
         domain = self.profile.getDomain()
         all_bids = AllBidsList(domain)
+        
+        # Now use all_bids to find a suitable bid based on our uitlity and the opponent's utility
 
         best_bid_score = 0.0
         best_bid = None
